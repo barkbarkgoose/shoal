@@ -36,3 +36,9 @@ python3 shoal.py
 
 Needs a terminal with truecolor support (iTerm2, Ghostty, kitty, recent
 Terminal.app, anything inside tmux ≥ 3.2 with `tmux-256color`).
+
+## Also in this repo
+
+[`maglev/`](maglev/) is a gravity + magnetism simulator for testing levitation
+ideas in the browser: a rigid platform, dipole magnets, AC coils, gravity, and
+a parameter-sweep explorer.

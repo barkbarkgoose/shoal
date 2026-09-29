@@ -1,0 +1,674 @@
+<title>Maglev Bench</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* Layout: a lab bench. Stage + trace on the left, the instrument panel on the right;
+   explorer and findings below. Copper coils, red/blue poles, verdigris controls. */
+:root {
+  --paper: #eef1f4;
+  --panel: #fafbfc;
+  --ink: #17212c;
+  --muted: #5a6674;
+  --line: #d3dae2;
+  --accent: #0d7466;
+  --accent-ink: #ffffff;
+  --north: #cf3339;
+  --south: #2d60c4;
+  --copper: #b06a2e;
+  --plate: rgba(23, 33, 44, 0.12);
+  --good: #1f8a4c;
+  --warn: #b7791f;
+  --bad: #c0392b;
+  --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1318; --panel: #151c24; --ink: #e2e8ee; --muted: #91a0af; --line: #2a3542;
+    --accent: #3bbfa9; --accent-ink: #06201b; --north: #ff6b6f; --south: #6d9bff; --copper: #dc9a5c;
+    --plate: rgba(226, 232, 238, 0.10); --good: #4cc987; --warn: #e0a84a; --bad: #ff7a6b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e1318; --panel: #151c24; --ink: #e2e8ee; --muted: #91a0af; --line: #2a3542;
+  --accent: #3bbfa9; --accent-ink: #06201b; --north: #ff6b6f; --south: #6d9bff; --copper: #dc9a5c;
+  --plate: rgba(226, 232, 238, 0.10); --good: #4cc987; --warn: #e0a84a; --bad: #ff7a6b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font: 400 15px/1.5 var(--body); margin: 0; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 28px; }
+h1, h2 { font-family: var(--display); font-weight: 800; letter-spacing: 0.01em; text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); text-transform: uppercase; }
+h2 { font-size: 1.7rem; text-transform: uppercase; }
+h3 { font: 600 1.02rem/1.3 var(--body); margin: 0; }
+p { margin: 0; }
+.lede { max-width: 68ch; color: var(--muted); font-size: 1.05rem; }
+header { display: grid; gap: 8px; }
+.eyebrow { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.stagecol { display: grid; gap: 12px; min-width: 0; }
+.stage { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+#view { display: block; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; }
+.hud { position: absolute; left: 12px; top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font: 500 0.8rem/1 var(--mono); }
+.pill { padding: 5px 9px; border-radius: 999px; font: 600 0.72rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid currentColor; background: var(--panel); }
+.pill.flying { color: var(--good); } .pill.crashed { color: var(--bad); } .pill.escaped { color: var(--warn); } .pill.paused { color: var(--muted); }
+.clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+.trace { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px 8px; display: grid; gap: 6px; }
+.trace-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font: 500 0.75rem/1.2 var(--mono); color: var(--muted); }
+.key { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
+.key i { width: 14px; height: 3px; display: inline-block; border-radius: 2px; }
+#trace { display: block; width: 100%; height: 150px; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: grid; gap: 16px; min-width: 0; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.presets button { font: 600 0.85rem/1 var(--body); padding: 8px 10px; border-radius: 4px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+.presets button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.presets button:hover { border-color: var(--accent); }
+.blurb { font-size: 0.93rem; color: var(--ink); }
+.blurb h3 { font-family: var(--display); font-size: 1.35rem; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.01em; }
+.section-label { font: 500 0.7rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.knobs { display: grid; gap: 12px; }
+.knob { display: grid; gap: 4px; }
+.knob-top { display: flex; justify-content: space-between; gap: 8px; font-size: 0.88rem; }
+.knob-top output { font: 500 0.82rem/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { font: 600 0.88rem/1 var(--body); padding: 9px 14px; border-radius: 4px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:focus-visible, .presets button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+label.check { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; }
+select, input[type="number"] { font: 400 0.88rem/1.2 var(--body); padding: 6px 8px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+input[type="number"] { width: 6.5em; font-family: var(--mono); }
+.readouts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 0; }
+.readouts div { display: grid; gap: 2px; min-width: 0; }
+.readouts dt { font: 500 0.68rem/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.readouts dd { margin: 0; font: 500 1.05rem/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+
+.explorer { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+.axisrow { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.axisrow .row { gap: 6px; }
+.map { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+#heat { display: block; width: 100%; aspect-ratio: 5 / 3; max-width: 100%; cursor: crosshair; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font: 500 0.75rem/1.2 var(--mono); color: var(--muted); align-items: center; }
+.ramp { width: 120px; height: 10px; border-radius: 2px; border: 1px solid var(--line); }
+progress { width: 100%; accent-color: var(--accent); height: 8px; }
+
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px 28px; }
+.finding { display: grid; gap: 6px; align-content: start; border-top: 2px solid var(--line); padding-top: 12px; }
+.finding.yes { border-top-color: var(--accent); }
+.finding p { font-size: 0.95rem; max-width: 62ch; }
+.tag { font: 600 0.68rem/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.finding.yes .tag { color: var(--accent); }
+.notes { color: var(--muted); font-size: 0.9rem; max-width: 80ch; display: grid; gap: 8px; }
+.notes ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+code { font: 0.86em var(--mono); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Gravity + magnetic dipole simulator</span>
+    <h1>Maglev Bench</h1>
+    <p class="lede">A rigid platform, point magnets, coils you can drive with AC, and gravity. The forces use the real dipole&ndash;dipole law, so you can test levitation ideas here before buying magnets. Pick a setup, tune the knobs, then map out where it floats with the explorer below.</p>
+  </header>
+
+  <section class="bench" aria-label="Simulator">
+    <div class="stagecol">
+      <div class="stage">
+        <canvas id="view" aria-label="Side view of the platform and magnets"></canvas>
+        <div class="hud"><span id="status" class="pill flying">flying</span><span id="clock" class="clock">t = 0.000 s</span></div>
+      </div>
+      <div class="trace">
+        <div class="trace-head">
+          <span>Last 3 s of sim time
+            <span class="key"><i style="background: var(--accent)"></i>gap above floor, mm</span>
+            <span class="key"><i style="background: var(--north)"></i>sideways drift, mm</span>
+          </span>
+          <span id="trace-scale"></span>
+        </div>
+        <canvas id="trace" aria-label="Height and drift over time"></canvas>
+      </div>
+    </div>
+
+    <aside class="panel" aria-label="Controls">
+      <div class="presets" id="presets" role="group" aria-label="Setups"></div>
+      <div class="blurb"><h3 id="p-title"></h3><p id="p-blurb"></p></div>
+      <div class="row">
+        <button class="btn primary" id="play">Pause</button>
+        <button class="btn" id="reset">Reset</button>
+        <button class="btn" id="nudge">Nudge</button>
+        <label class="check" for="speed">Speed
+          <select id="speed">
+            <option value="1">1&times;</option>
+            <option value="0.25" selected>&frac14;&times;</option>
+            <option value="0.05">1/20&times;</option>
+            <option value="0.01">1/100&times;</option>
+          </select>
+        </label>
+      </div>
+      <div class="knobs" id="knobs"></div>
+      <div class="row">
+        <label class="check" for="lock-x"><input type="checkbox" id="lock-x">Rails: lock sideways</label>
+        <label class="check" for="lock-th"><input type="checkbox" id="lock-th">Lock tilt</label>
+      </div>
+      <dl class="readouts">
+        <div><dt>Gap above floor</dt><dd id="r-gap">&ndash;</dd></div>
+        <div><dt>Sideways drift</dt><dd id="r-x">&ndash;</dd></div>
+        <div><dt>Tilt</dt><dd id="r-th">&ndash;</dd></div>
+        <div><dt>Lift now</dt><dd id="r-lift">&ndash;</dd></div>
+        <div><dt>Mean lift (0.5 s)</dt><dd id="r-mean">&ndash;</dd></div>
+        <div><dt>Internal force sum</dt><dd id="r-int">&ndash;</dd></div>
+      </dl>
+    </aside>
+  </section>
+
+  <section class="explorer" aria-label="Explorer">
+    <div class="panel">
+      <div class="blurb"><h3>Explorer</h3><p>Sweeps two knobs of the current setup and runs every combination headless. Each cell shows how long the platform stayed up. Click a cell to load it into the simulator.</p></div>
+      <div class="axisrow">
+        <span class="section-label">Across (x)</span>
+        <div class="row"><select id="ex-x" aria-label="X knob"></select><input type="number" id="ex-x0" aria-label="X from"><input type="number" id="ex-x1" aria-label="X to"></div>
+      </div>
+      <div class="axisrow">
+        <span class="section-label">Up (y)</span>
+        <div class="row"><select id="ex-y" aria-label="Y knob"></select><input type="number" id="ex-y0" aria-label="Y from"><input type="number" id="ex-y1" aria-label="Y to"></div>
+      </div>
+      <div class="row">
+        <label class="check" for="ex-n">Grid
+          <select id="ex-n"><option value="6">6 &times; 6</option><option value="10" selected>10 &times; 10</option><option value="16">16 &times; 16</option></select>
+        </label>
+        <label class="check" for="ex-t">Run for
+          <select id="ex-t"><option value="1">1 s</option><option value="2" selected>2 s</option><option value="5">5 s</option></select>
+        </label>
+      </div>
+      <div class="row"><button class="btn primary" id="ex-go">Run sweep</button><button class="btn" id="ex-stop" disabled>Stop</button></div>
+      <progress id="ex-prog" max="1" value="0"></progress>
+      <p class="notes" id="ex-note">Runs in your browser. A 10 &times; 10 sweep of the AC presets takes roughly 15&ndash;40 s.</p>
+    </div>
+    <div class="map">
+      <canvas id="heat" aria-label="Survival map"></canvas>
+      <div class="legend">
+        <span>time aloft</span><span>0 s</span><canvas class="ramp" id="ramp" width="120" height="10"></canvas><span id="leg-max">full run</span>
+        <span id="ex-hover"></span>
+      </div>
+    </div>
+  </section>
+
+  <section style="display: grid; gap: 16px">
+    <h2>What the bench says</h2>
+    <div class="findings">
+      <div class="finding">
+        <span class="tag">Phased push/pull pairs</span>
+        <p>Held still, every coil averages exactly zero over a cycle, so the total is zero at any stagger. At 90&deg; the stagger works perfectly: at every instant the lifting units and the pushing-down units cancel to within 1% of the weight. Released, the platform falls in under 0.1 s. Adding DC bias gives real lift (0.89&times; the weight at bias 1), but that is a static magnet with ripple, and it tips over in 0.2 s.</p>
+      </div>
+      <div class="finding">
+        <span class="tag">Magnets only on board</span>
+        <p>Pairs mounted on the platform, however they oscillate, sum to zero force (the readout shows ~1e-16 N, which is rounding error). A platform cannot lift itself by pushing on itself. The lift has to react against the ground.</p>
+      </div>
+      <div class="finding">
+        <span class="tag">Static magnets</span>
+        <p>Permanent magnets carry the weight easily but slide off sideways in about 0.2 s. Lock sideways motion and tilt and it floats indefinitely. That one missing direction is what Earnshaw&rsquo;s theorem guarantees, at any scale and with any number of magnets.</p>
+      </div>
+      <div class="finding yes">
+        <span class="tag">Found: pure AC can levitate</span>
+        <p>Coils with zero average current (half push, half pull) do hold a magnet up, stably, for as long as the sim runs. The platform shakes slightly in time with the drive and is always a little farther from the coils while they pull, so repulsion wins on average. Earnshaw only covers static fields, so this is allowed. It is the same physics as a Paul ion trap or Kapitza&rsquo;s upside-down pendulum.</p>
+      </div>
+      <div class="finding yes">
+        <span class="tag">The twist on your idea</span>
+        <p>It only works when the units are <em>in phase</em>. Up to about 45&deg; of stagger the four-trap platform stays up. At 90&deg; it rocks and falls in 0.25 s, and at 180&deg; it falls in 0.07 s. The platform has to jiggle as one body. Spreading the push and pull across units cancels the jiggle that produces the lift.</p>
+      </div>
+      <div class="finding">
+        <span class="tag">The cost</span>
+        <p>The AC platform needs coils peaking at 20 A&middot;m&sup2; each: about twenty 1 cm neodymium cubes&rsquo; worth of moment, reversing 120 times a second. That means thousands of ampere-turns per coil and continuous resistive heating. Lift falls with frequency squared, and below about 60 Hz the trap goes unstable. It is a real effect but an expensive one, which is why trains use feedback control.</p>
+      </div>
+    </div>
+    <div class="notes">
+      <p><strong>Model limits.</strong> Treat surprises here as leads to check, not as results.</p>
+      <ul>
+        <li>Point dipoles with a 3&ndash;4 mm softening length. Real magnets have size, and forces at contact distance are approximate.</li>
+        <li>Motion is confined to one vertical plane: sideways, up/down, and one tilt. A real platform has three more ways to move (another sideways axis, two more tilts, spin), and each must also be stable.</li>
+        <li>Coils are ideal: current follows the drive instantly. No inductance, eddy currents, heating, or iron cores.</li>
+        <li>Semi-implicit Euler at 10&ndash;50 &micro;s steps. The AC results are unchanged at 4 &micro;s.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="physics.js"></script>
+<script src="presets.js"></script>
+<script>
+(() => {
+  'use strict';
+  const P = window.MagPhys, { presets, knobs } = window.MagPresets;
+  const $ = (id) => document.getElementById(id);
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let C = {};
+  const readColors = () => { C = Object.fromEntries(['paper','panel','ink','muted','line','accent','north','south','copper','plate','good','bad','warn'].map((k) => [k, cssVar('--' + k)])); };
+  readColors();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readColors);
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  let key = 'ac-platform';
+  let base = null; // preset config with the user's knob values applied
+  let sim = null;
+  let running = true;
+  let meanLift = 0, meanSide = 0;
+  let trace = [];
+  let lastSample = 0;
+
+  function viewOf(cfg) {
+    return cfg.view || { cx: 0, cy: cfg.bounds && cfg.bounds.ceilSolid ? cfg.bounds.ceil / 2 + 0.01 : 0.07, half: 0.2 };
+  }
+
+  function loadPreset(k) {
+    key = k;
+    base = P.clone(presets[k]);
+    for (const b of document.querySelectorAll('#presets button')) b.setAttribute('aria-pressed', String(b.dataset.key === k));
+    $('p-title').textContent = presets[k].title;
+    $('p-blurb').textContent = presets[k].blurb;
+    buildKnobs();
+    buildExplorerAxes();
+    reset();
+  }
+
+  function reset() {
+    sim = P.create(base);
+    sim.cfg.lock = { x: $('lock-x').checked, theta: $('lock-th').checked };
+    meanLift = 0; meanSide = 0; trace = []; lastSample = 0;
+    draw(); drawTrace(); updateReadouts();
+  }
+
+  function fmt(v, step) {
+    const d = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3;
+    return Number(v).toFixed(d);
+  }
+
+  function buildKnobs() {
+    const box = $('knobs');
+    box.textContent = '';
+    for (const [id, kn] of Object.entries(knobs)) {
+      if (!kn.has(base)) continue;
+      const v = kn.get(base);
+      const wrap = document.createElement('div');
+      wrap.className = 'knob';
+      wrap.innerHTML = `<div class="knob-top"><label for="k-${id}">${kn.label}</label><output id="o-${id}"></output></div>
+        <input type="range" id="k-${id}" min="${kn.min}" max="${kn.max}" step="${kn.step}" value="${v}">`;
+      box.appendChild(wrap);
+      const input = wrap.querySelector('input'), out = wrap.querySelector('output');
+      const show = () => (out.textContent = `${fmt(input.value, kn.step)} ${kn.unit}`.trim());
+      show();
+      input.addEventListener('input', () => {
+        const val = Number(input.value);
+        show();
+        if (id === 'mass') sim.I *= val / sim.cfg.platform.mass;
+        kn.set(base, val);
+        kn.set(sim.cfg, val); // live: no reset needed
+      });
+    }
+  }
+
+  // ---- drawing ------------------------------------------------------------
+  const view = $('view'), vctx = view.getContext('2d');
+  function fit(cv) {
+    const r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    return { w, h, dpr };
+  }
+
+  function drawMagnet(ctx, x, y, ang, mx, my, s, kind) {
+    const mag = Math.hypot(mx, my);
+    // flip the drawn poles when the current reverses
+    const cosd = Math.cos(ang) * mx + Math.sin(ang) * my;
+    const sign = cosd >= 0 ? 1 : -1;
+    const peak = kind.peak || mag || 1;
+    const a = kind.coil ? Math.min(1, mag / peak) : 1;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-ang);
+    ctx.globalAlpha = 0.25 + 0.75 * a;
+    ctx.fillStyle = sign > 0 ? C.north : C.south;
+    ctx.fillRect(0, -s / 2, s / 2, s);
+    ctx.fillStyle = sign > 0 ? C.south : C.north;
+    ctx.fillRect(-s / 2, -s / 2, s / 2, s);
+    ctx.globalAlpha = 1;
+    if (kind.coil) {
+      ctx.strokeStyle = C.copper;
+      ctx.lineWidth = Math.max(2, s * 0.14);
+      ctx.strokeRect(-s / 2 - ctx.lineWidth / 2, -s / 2 - ctx.lineWidth / 2, s + ctx.lineWidth, s + ctx.lineWidth);
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    const { w, h, dpr } = fit(view);
+    const ctx = vctx;
+    ctx.fillStyle = C.panel; ctx.fillRect(0, 0, w, h);
+    const v = viewOf(base);
+    const sc = w / (2 * v.half);
+    const X = (x) => w / 2 + (x - v.cx) * sc;
+    const Y = (y) => h / 2 - (y - v.cy) * sc;
+    const cfg = sim.cfg;
+
+    // floor
+    const fy = Y(0);
+    ctx.strokeStyle = C.muted; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(0, fy); ctx.lineTo(w, fy); ctx.stroke();
+    ctx.lineWidth = 1 * dpr; ctx.strokeStyle = C.line;
+    for (let x = -20; x < w + 20; x += 12 * dpr) { ctx.beginPath(); ctx.moveTo(x, fy); ctx.lineTo(x - 8 * dpr, fy + 8 * dpr); ctx.stroke(); }
+    if (cfg.bounds && cfg.bounds.ceilSolid) {
+      const cy = Y(cfg.bounds.ceil);
+      ctx.strokeStyle = C.muted; ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+      ctx.lineWidth = 1 * dpr; ctx.strokeStyle = C.line;
+      for (let x = -20; x < w + 20; x += 12 * dpr) { ctx.beginPath(); ctx.moveTo(x, cy); ctx.lineTo(x + 8 * dpr, cy - 8 * dpr); ctx.stroke(); }
+    }
+
+    const f = sim.last || P.forces(sim);
+    const magSize = Math.max(8 * dpr, Math.min(0.012 * sc, 34 * dpr));
+
+    // fixed magnets
+    cfg.fixed.forEach((m, i) => {
+      const [mx, my] = f.fix[i] ? [f.fix[i].mx, f.fix[i].my] : [0, 0];
+      const coil = m.mode !== 'static';
+      const peak = m.mode === 'ac' ? m.m0 * (Math.abs(m.bias || 0) + Math.abs(m.amp ?? 1)) : m.mode === 'feedback' ? m.m0 * cfg.feedback.max * 0.4 : 0;
+      drawMagnet(ctx, X(m.x), Y(m.y), m.angle, mx, my, magSize, { coil, peak });
+    });
+
+    // platform
+    const s = sim.s, P0 = cfg.platform;
+    ctx.save();
+    ctx.translate(X(s.x), Y(s.y));
+    ctx.rotate(-s.th);
+    const pw = P0.width * sc, ph = P0.height * sc;
+    ctx.fillStyle = C.plate; ctx.strokeStyle = C.ink; ctx.lineWidth = 1.5 * dpr;
+    ctx.fillRect(-pw / 2, -ph / 2, pw, ph); ctx.strokeRect(-pw / 2, -ph / 2, pw, ph);
+    ctx.restore();
+    const pmSize = Math.min(magSize * 0.8, Math.max(6 * dpr, P0.height * sc * 0.9));
+    P0.magnets.forEach((m, j) => {
+      const a = f.att[j];
+      const coil = m.mode !== 'static';
+      drawMagnet(ctx, X(a.wx), Y(a.wy), m.angle + s.th, a.mx, a.my, pmSize, { coil, peak: m.m0 });
+    });
+
+    // force arrows at the centre of mass: magnetic (accent) and weight (muted)
+    const cx = X(s.x), cy = Y(s.y);
+    const per = 40 * dpr; // pixels per weight
+    arrow(ctx, cx, cy, cx, cy + per, C.muted, dpr, true);
+    const ey = Math.max(-3, Math.min(3, meanLift)), ex = Math.max(-3, Math.min(3, meanSide));
+    arrow(ctx, cx, cy, cx + ex * per, cy - ey * per, C.accent, dpr, false);
+
+    // scale bar
+    const bar = 0.01 * sc;
+    const bx = w - 16 * dpr - bar, by = h - 16 * dpr;
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bar, by); ctx.moveTo(bx, by - 4 * dpr); ctx.lineTo(bx, by + 4 * dpr); ctx.moveTo(bx + bar, by - 4 * dpr); ctx.lineTo(bx + bar, by + 4 * dpr); ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.font = `${11 * dpr}px ${cssVar('--mono')}`; ctx.textAlign = 'right';
+    ctx.fillText('1 cm', bx + bar, by - 8 * dpr);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = C.accent; ctx.fillText('mean magnetic force (0.5 s)', 12 * dpr, h - 28 * dpr);
+    ctx.fillStyle = C.muted; ctx.fillText('weight (arrow = 1×)', 12 * dpr, h - 12 * dpr);
+  }
+
+  function arrow(ctx, x0, y0, x1, y1, color, dpr, dashed) {
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    if (len < 2) return;
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2 * dpr;
+    if (dashed) ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.setLineDash([]);
+    const a = Math.atan2(y1 - y0, x1 - x0), hs = 7 * dpr;
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - hs * Math.cos(a - 0.4), y1 - hs * Math.sin(a - 0.4));
+    ctx.lineTo(x1 - hs * Math.cos(a + 0.4), y1 - hs * Math.sin(a + 0.4));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  const tcv = $('trace'), tctx = tcv.getContext('2d');
+  const WINDOW = 3;
+  function drawTrace() {
+    const { w, h, dpr } = fit(tcv);
+    const ctx = tctx;
+    ctx.fillStyle = C.panel; ctx.fillRect(0, 0, w, h);
+    const padL = 40 * dpr, padR = 8 * dpr, padT = 6 * dpr, padB = 18 * dpr;
+    const t1 = Math.max(WINDOW, sim.t), t0 = t1 - WINDOW;
+    let lo = 0, hi = 10;
+    for (const p of trace) { lo = Math.min(lo, p[1], p[2]); hi = Math.max(hi, p[1], p[2]); }
+    const step = niceStep((hi - lo) / 4);
+    lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+    const X = (t) => padL + ((t - t0) / WINDOW) * (w - padL - padR);
+    const Y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (h - padT - padB);
+    ctx.font = `${10 * dpr}px ${cssVar('--mono')}`;
+    ctx.lineWidth = 1 * dpr;
+    for (let v = lo; v <= hi + 1e-9; v += step) {
+      ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(padL, Y(v)); ctx.lineTo(w - padR, Y(v)); ctx.stroke();
+      ctx.fillStyle = C.muted; ctx.textAlign = 'right'; ctx.fillText(String(+v.toFixed(2)), padL - 6 * dpr, Y(v) + 3 * dpr);
+    }
+    ctx.textAlign = 'center';
+    for (let t = Math.ceil(t0 * 2) / 2; t <= t1 + 1e-9; t += 0.5) ctx.fillText(t.toFixed(1) + ' s', X(t), h - 4 * dpr);
+    for (const [col, idx] of [[C.accent, 1], [C.north, 2]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6 * dpr; ctx.beginPath();
+      let first = true;
+      for (const p of trace) { if (p[0] < t0) continue; const x = X(p[0]), y = Y(p[idx]); if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y); }
+      ctx.stroke();
+      const lastP = trace[trace.length - 1];
+      if (lastP) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(lastP[0]), Y(lastP[idx]), 3 * dpr, 0, 7); ctx.fill(); }
+    }
+  }
+  function niceStep(r) {
+    const e = Math.pow(10, Math.floor(Math.log10(Math.max(r, 1e-6)))), m = r / e;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e;
+  }
+
+  function gapOf() {
+    let lo = Infinity;
+    for (const [, y] of P.corners(sim)) lo = Math.min(lo, y);
+    return lo;
+  }
+
+  function updateReadouts() {
+    const f = sim.last || P.forces(sim);
+    const st = running || sim.status !== 'flying' ? sim.status : 'paused';
+    const pill = $('status'); pill.className = 'pill ' + st;
+    pill.textContent = st === 'flying' ? 'aloft' : st === 'crashed' ? `crashed at ${sim.statusT.toFixed(3)} s` : st === 'escaped' ? 'flew off' : 'paused';
+    $('clock').textContent = `t = ${sim.t.toFixed(3)} s`;
+    $('r-gap').textContent = `${(gapOf() * 1000).toFixed(2)} mm`;
+    $('r-x').textContent = `${((sim.s.x - (base.platform.x || 0)) * 1000).toFixed(2)} mm`;
+    $('r-th').textContent = `${(sim.s.th * 180 / Math.PI).toFixed(2)}°`;
+    $('r-lift').textContent = `${(f.ey / f.weight).toFixed(2)}× wt`;
+    $('r-mean').textContent = `${meanLift.toFixed(3)}× wt`;
+    const hasInternal = base.platform.magnets.length > 1;
+    $('r-int').textContent = hasInternal ? `${Math.hypot(f.ix, f.iy).toExponential(1)} N` : 'n/a';
+  }
+
+  // ---- main loop ----------------------------------------------------------
+  let prev = performance.now();
+  function frame(now) {
+    const real = Math.min(0.05, (now - prev) / 1000);
+    prev = now;
+    if (running && sim.status === 'flying' && !sweeping) {
+      const dt = sim.cfg.dt || 2e-5;
+      const want = real * Number($('speed').value);
+      const n = Math.min(Math.ceil(want / dt), 6000);
+      for (let i = 0; i < n && sim.status === 'flying'; i++) {
+        P.step(sim, dt);
+        meanLift += (sim.last.ey / sim.last.weight - meanLift) * (dt / 0.5);
+        meanSide += (sim.last.ex / sim.last.weight - meanSide) * (dt / 0.5);
+        if (sim.t - lastSample >= 0.002) {
+          lastSample = sim.t;
+          trace.push([sim.t, gapOf() * 1000, (sim.s.x - (base.platform.x || 0)) * 1000]);
+        }
+      }
+      while (trace.length && trace[0][0] < sim.t - WINDOW - 0.1) trace.shift();
+    }
+    draw(); drawTrace(); updateReadouts();
+    requestAnimationFrame(frame);
+  }
+
+  // ---- controls -----------------------------------------------------------
+  const box = $('presets');
+  for (const [k, p] of Object.entries(presets)) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.dataset.key = k; b.textContent = p.short; b.title = p.title;
+    b.addEventListener('click', () => loadPreset(k));
+    box.appendChild(b);
+  }
+  $('play').addEventListener('click', () => { running = !running; $('play').textContent = running ? 'Pause' : 'Play'; });
+  $('reset').addEventListener('click', reset);
+  $('nudge').addEventListener('click', () => { if (sim.status !== 'flying') return; sim.s.vx += 0.02; sim.s.w += 0.3; });
+  $('lock-x').addEventListener('change', (e) => (sim.cfg.lock.x = e.target.checked));
+  $('lock-th').addEventListener('change', (e) => (sim.cfg.lock.theta = e.target.checked));
+
+  // ---- explorer -----------------------------------------------------------
+  let sweeping = false, stopFlag = false, grid = null;
+  const heat = $('heat'), hctx = heat.getContext('2d');
+
+  function buildExplorerAxes() {
+    const avail = Object.entries(knobs).filter(([, k]) => k.has(base));
+    for (const [sel, pick] of [['ex-x', 0], ['ex-y', 1]]) {
+      const s = $(sel); s.textContent = '';
+      for (const [id, k] of avail) { const o = document.createElement('option'); o.value = id; o.textContent = k.label; s.appendChild(o); }
+      const pref = { 'ac-platform': ['freq', 'phaseStep'], 'ac-puck': ['freq', 'coil'], 'your-idea': ['phaseStep', 'bias'], feedback: ['kp', 'kd'], closed: ['freq', 'coil'] }[key];
+      s.value = pref && avail.some(([id]) => id === pref[pick]) ? pref[pick] : avail[Math.min(pick, avail.length - 1)][0];
+      setRange(sel);
+    }
+    grid = null; drawHeat();
+  }
+  function setRange(sel) {
+    const k = knobs[$(sel).value], v = k.get(base);
+    let lo = Math.max(k.min, v * 0.25), hi = Math.min(k.max, Math.max(v * 2, k.min + (k.max - k.min) * 0.2));
+    if ($(sel).value === 'phaseStep') { lo = 0; hi = 180; }
+    if ($(sel).value === 'bias') { lo = 0; hi = 2; }
+    $(sel + '0').value = +lo.toFixed(4); $(sel + '1').value = +hi.toFixed(4);
+    $(sel + '0').step = $(sel + '1').step = k.step;
+  }
+  $('ex-x').addEventListener('change', () => { setRange('ex-x'); grid = null; drawHeat(); });
+  $('ex-y').addEventListener('change', () => { setRange('ex-y'); grid = null; drawHeat(); });
+
+  function axisVals(sel, n) {
+    const a = Number($(sel + '0').value), b = Number($(sel + '1').value);
+    return Array.from({ length: n }, (_, i) => a + ((b - a) * i) / (n - 1));
+  }
+
+  async function sweep() {
+    const n = Number($('ex-n').value), T = Number($('ex-t').value);
+    const kx = $('ex-x').value, ky = $('ex-y').value;
+    const xs = axisVals('ex-x', n), ys = axisVals('ex-y', n);
+    grid = { n, T, kx, ky, xs, ys, cells: new Array(n * n).fill(null), key };
+    const lock = { x: $('lock-x').checked, theta: $('lock-th').checked };
+    sweeping = true; stopFlag = false;
+    $('ex-go').disabled = true; $('ex-stop').disabled = false;
+    const t0 = performance.now();
+    for (let i = 0; i < n * n && !stopFlag; i++) {
+      const cx = i % n, cy = Math.floor(i / n);
+      const c = P.clone(base);
+      c.lock = lock;
+      knobs[kx].set(c, xs[cx]);
+      knobs[ky].set(c, ys[cy]);
+      if (kx === 'mass' || ky === 'mass') c.platform.inertia = undefined;
+      grid.cells[i] = P.run(c, T, { dt: c.dt });
+      $('ex-prog').value = (i + 1) / (n * n);
+      drawHeat();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    const done = grid.cells.filter(Boolean);
+    const up = done.filter((r) => r.status === 'flying').length;
+    $('ex-note').textContent = `${stopFlag ? 'Stopped. ' : ''}${up} of ${done.length} combinations stayed up for the full ${T} s (${((performance.now() - t0) / 1000).toFixed(1)} s to compute).`;
+    sweeping = false; prev = performance.now();
+    $('ex-go').disabled = false; $('ex-stop').disabled = true;
+  }
+  $('ex-go').addEventListener('click', sweep);
+  $('ex-stop').addEventListener('click', () => (stopFlag = true));
+
+  function mix(a, b, t) {
+    const pa = parse(a), pb = parse(b);
+    return `rgb(${pa.map((v, i) => Math.round(v + (pb[i] - v) * t)).join(',')})`;
+  }
+  function parse(c) {
+    if (c.startsWith('#')) { const h = c.length === 4 ? c.slice(1).split('').map((x) => x + x).join('') : c.slice(1, 7); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); }
+    const m = c.match(/[\d.]+/g); return m ? m.slice(0, 3).map(Number) : [128, 128, 128];
+  }
+  function cellColor(r, T) {
+    if (!r) return C.panel;
+    if (r.status === 'flying') return C.accent;
+    return mix(C.line, C.warn, Math.min(1, r.survived / T) * 0.9);
+  }
+  const HP = { l: 56, r: 12, t: 12, b: 40 };
+  function drawHeat() {
+    const { w, h, dpr } = fit(heat);
+    const ctx = hctx;
+    ctx.fillStyle = C.panel; ctx.fillRect(0, 0, w, h);
+    const l = HP.l * dpr, r = HP.r * dpr, t = HP.t * dpr, b = HP.b * dpr;
+    ctx.font = `${10 * dpr}px ${cssVar('--mono')}`; ctx.fillStyle = C.muted;
+    // ramp legend
+    const rc = $('ramp').getContext('2d');
+    for (let i = 0; i < 120; i++) { rc.fillStyle = i > 114 ? C.accent : mix(C.line, C.warn, (i / 114) * 0.9); rc.fillRect(i, 0, 1, 10); }
+    if (!grid) {
+      ctx.textAlign = 'center';
+      ctx.fillText('Pick two knobs and run a sweep', w / 2, h / 2);
+      return;
+    }
+    const n = grid.n, cw = (w - l - r) / n, ch = (h - t - b) / n;
+    grid.cells.forEach((res, i) => {
+      const cx = i % n, cy = Math.floor(i / n);
+      ctx.fillStyle = cellColor(res, grid.T);
+      ctx.fillRect(l + cx * cw + 1, h - b - (cy + 1) * ch + 1, cw - 2, ch - 2);
+    });
+    ctx.fillStyle = C.muted; ctx.textAlign = 'center';
+    const kx = knobs[grid.kx], ky = knobs[grid.ky];
+    const every = Math.ceil(n / 6);
+    grid.xs.forEach((v, i) => { if (i % every === 0 || i === n - 1) ctx.fillText(fmt(v, kx.step), l + (i + 0.5) * cw, h - b + 14 * dpr); });
+    ctx.fillText(`${kx.label}${kx.unit ? ' (' + kx.unit + ')' : ''}`, l + (w - l - r) / 2, h - 6 * dpr);
+    ctx.textAlign = 'right';
+    grid.ys.forEach((v, i) => { if (i % every === 0 || i === n - 1) ctx.fillText(fmt(v, ky.step), l - 6 * dpr, h - b - (i + 0.5) * ch + 3 * dpr); });
+    ctx.save(); ctx.translate(12 * dpr, t + (h - t - b) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center';
+    ctx.fillText(`${ky.label}${ky.unit ? ' (' + ky.unit + ')' : ''}`, 0, 0); ctx.restore();
+    $('leg-max').textContent = `stayed up ${grid.T} s`;
+  }
+  function cellAt(ev) {
+    if (!grid) return null;
+    const rect = heat.getBoundingClientRect();
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    const n = grid.n, cw = (rect.width - HP.l - HP.r) / n, ch = (rect.height - HP.t - HP.b) / n;
+    const cx = Math.floor((x - HP.l) / cw), cy = Math.floor((rect.height - HP.b - y) / ch);
+    if (cx < 0 || cy < 0 || cx >= n || cy >= n) return null;
+    return { cx, cy, res: grid.cells[cy * n + cx] };
+  }
+  heat.addEventListener('mousemove', (ev) => {
+    const c = cellAt(ev);
+    if (!c) { $('ex-hover').textContent = ''; return; }
+    const kx = knobs[grid.kx], ky = knobs[grid.ky];
+    const r = c.res;
+    $('ex-hover').textContent = `${fmt(grid.xs[c.cx], kx.step)} ${kx.unit} · ${fmt(grid.ys[c.cy], ky.step)} ${ky.unit} → ` +
+      (!r ? 'not run' : r.status === 'flying' ? `up the whole run, mean lift ${r.liftRatio.toFixed(2)}×` : `${r.status} at ${r.survived.toFixed(2)} s`);
+  });
+  heat.addEventListener('click', (ev) => {
+    const c = cellAt(ev);
+    if (!c || grid.key !== key) return;
+    for (const [k, v] of [[grid.kx, grid.xs[c.cx]], [grid.ky, grid.ys[c.cy]]]) {
+      knobs[k].set(base, v);
+      const input = $('k-' + k);
+      if (input) { input.value = v; input.dispatchEvent(new Event('input')); }
+    }
+    reset();
+    running = true; $('play').textContent = 'Pause';
+    $('view').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+  });
+  window.addEventListener('resize', drawHeat);
+
+  loadPreset(key);
+  requestAnimationFrame(frame);
+})();
+</script>
